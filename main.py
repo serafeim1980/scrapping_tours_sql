@@ -7,10 +7,6 @@ import ssl
 import time
 import sqlite3
 
-"INSERT INTO events VALUES('Metallica', 'Athens', '2026.09.05')"
-"SELECT * FROM events WHERE date='2025.10.07'"
-"DELETE FROM events WHERE date='2026.30.05'"
-
 
 load_dotenv()
 print(os.getenv("MY_USERNAME"))
@@ -20,69 +16,73 @@ URL = "https://programmer100.pythonanywhere.com/tours/"
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
 
-connection = sqlite3.connect("data.db")
+
+class Event:
+    def scrape(self, url):
+        """Scrape the page source from URL"""
+        response = requests.get(url, headers=HEADERS)
+        source = response.text
+        return source
+
+    def extract(self, source):
+        extractor = selectorlib.Extractor.from_yaml_file("extract.yaml")
+        value = extractor.extract(source)["tours"]
+        return value
 
 
-def scrape(url):
-    """Scrape the page source from URL"""
-    response = requests.get(url, headers=HEADERS)
-    source = response.text
-    return source
+class Email:
+    def send(self, message):
+        host = "smtp.gmail.com"
+        port = 465
+
+        username = os.getenv("MY_USERNAME")
+        password = os.getenv("MY_PASSWORD")
+        receiver = os.getenv("MY_RECEIVER")
+
+        context = ssl.create_default_context()
+
+        with smtplib.SMTP_SSL(host, port, context=context) as server:
+            server.login(username, password)
+            server.sendmail(username, receiver, message)
+        print("Email was sent!")
 
 
-def extract(source):
-    extractor = selectorlib.Extractor.from_yaml_file("extract.yaml")
-    value = extractor.extract(source)["tours"]
-    return value
+class Database:
+    def __init__(self, database_path):
+        self.connection = sqlite3.connect(database_path)
+    def store(self, extracted):
+        row = extracted.split(",")
+        row = [item.strip() for item in row]
+        cursor = self.connection.cursor()
+        cursor.execute("INSERT INTO events VALUES(?,?,?)", row)
+        self.connection.commit()
 
-def send_email(message):
-    host = "smtp.gmail.com"
-    port = 465
-
-    username = os.getenv("MY_USERNAME")
-    password = os.getenv("MY_PASSWORD")
-    receiver = os.getenv("MY_RECEIVER")
-
-    context = ssl.create_default_context()
-
-    with smtplib.SMTP_SSL(host, port, context=context) as server:
-        server.login(username, password)
-        server.sendmail(username, receiver, message)
-
-    print("Email was sent!")
-
-
-
-def store(extracted):
-    row = extracted.split(",")
-    row = [item.strip() for item in row]
-    cursor = connection.cursor()
-    cursor.execute("INSERT INTO events VALUES(?,?,?)", row)
-    connection.commit()
-
-def read(extracted):
-    row = extracted.split(",")
-    row = [item.strip() for item in row]
-    band, city, date = row
-    cursor = connection.cursor()
-    cursor.execute("SELECT band, date FROM events WHERE band=? AND city=? AND date=?",
-                   (band,city,date))
-    rows = cursor.fetchall()
-    print(rows)
-    return rows
+    def read(self, extracted):
+        row = extracted.split(",")
+        row = [item.strip() for item in row]
+        band, city, date = row
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT band, date FROM events WHERE band=? AND city=? AND date=?",
+                       (band,city,date))
+        rows = cursor.fetchall()
+        print(rows)
+        return rows
 
 
 if __name__ == "__main__":
     while True:
-        scraped = scrape(URL)
-        extracted = extract(scraped)
+        event = Event()
+        scraped = event.scrape(URL)
+        extracted = event.extract(scraped)
         print(extracted)
 
         if extracted != "No upcoming tours":
-            row = read(extracted)
+            database = Database(database_path="data.db")
+            row = database.read(extracted)
             if not row:
-                store(extracted)
-                send_email(message="New event was found!")
+                email = Email()
+                database.store(extracted)
+                email.send(message="New event was found!")
 
         time.sleep(2)
 
